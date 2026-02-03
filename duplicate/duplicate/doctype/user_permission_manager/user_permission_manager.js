@@ -42,18 +42,25 @@ frappe.ui.form.on('User Permission Manager', {
 });
 
 frappe.ui.form.on('User Permission Details', {
+	form_render: function(frm, cdt, cdn) {
+		// Set field properties when row form renders (in edit dialog)
+		var row = locals[cdt][cdn];
+		toggle_applicable_for_field(frm, cdt, cdn, row);
+	},
+
 	allow: function(frm, cdt, cdn) {
 		// Clear for_value when allow changes
 		frappe.model.set_value(cdt, cdn, 'for_value', '');
 	},
-	
+
 	apply_to_all_doctypes: function(frm, cdt, cdn) {
 		var row = locals[cdt][cdn];
 		if (row.apply_to_all_doctypes) {
 			frappe.model.set_value(cdt, cdn, 'applicable_for', '');
 		}
+		toggle_applicable_for_field(frm, cdt, cdn, row);
 	},
-	
+
 	applicable_for: function(frm, cdt, cdn) {
 		var row = locals[cdt][cdn];
 		if (row.applicable_for) {
@@ -61,6 +68,18 @@ frappe.ui.form.on('User Permission Details', {
 		}
 	}
 });
+
+function toggle_applicable_for_field(frm, cdt, cdn, row) {
+	// Toggle the applicable_for field based on apply_to_all_doctypes
+	var grid_row = frm.fields_dict.user_permission_details.grid.get_row(cdn);
+	if (grid_row && grid_row.doc) {
+		var is_disabled = row.apply_to_all_doctypes ? 1 : 0;
+		if (grid_row.fields_dict && grid_row.fields_dict.applicable_for) {
+			grid_row.fields_dict.applicable_for.df.read_only = is_disabled;
+			grid_row.fields_dict.applicable_for.refresh();
+		}
+	}
+}
 
 function apply_to_user_direct(frm, silent = false) {
 	if (!frm.doc.user_field) {

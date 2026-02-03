@@ -11,7 +11,7 @@ class UserPermissionManager(Document):
 		"""Validate the User Permission Manager"""
 		if not self.user_permission_details:
 			frappe.throw(_("Please add at least one User Permission Detail"))
-		
+
 		# Validate duplicate entries
 		seen_combinations = set()
 		for detail in self.user_permission_details:
@@ -21,6 +21,18 @@ class UserPermissionManager(Document):
 					detail.allow, detail.for_value
 				))
 			seen_combinations.add(combination)
+
+		# Validate only one default per doctype (allow)
+		default_per_doctype = {}
+		for detail in self.user_permission_details:
+			if detail.is_default:
+				if detail.allow in default_per_doctype:
+					frappe.throw(
+						_("Only one default value is allowed per DocType. Multiple defaults found for {0}").format(
+							detail.allow
+						)
+					)
+				default_per_doctype[detail.allow] = detail.for_value
 		
 		# Check for missing permissions if manager is active
 		if self.is_active and not self.is_new():
@@ -72,6 +84,11 @@ class UserPermissionManager(Document):
 	
 	def create_user_permission(self, user, detail):
 		"""Create a single user permission"""
+		# If this permission is being set as default, clear any existing defaults
+		# for the same user and doctype to avoid Frappe's validation error
+		if detail.is_default:
+			self.clear_existing_defaults(user, detail.allow)
+
 		# Check if permission already exists
 		existing = frappe.db.exists("User Permission", {
 			"user": user,
@@ -79,18 +96,19 @@ class UserPermissionManager(Document):
 			"for_value": detail.for_value,
 			"applicable_for": detail.applicable_for or None
 		})
-		
+
 		if existing:
 			# Update existing permission
 			perm_doc = frappe.get_doc("User Permission", existing)
-			perm_doc.apply_to_all = 1 if detail.apply_to_all_doctypes else 0
+			perm_doc.applicable_for = detail.applicable_for or None
+			perm_doc.apply_to_all_doctypes = 1 if detail.apply_to_all_doctypes else 0
 			perm_doc.is_default = 1 if detail.is_default else 0
 			perm_doc.hide_descendants = 1 if detail.hide_descendants else 0
-			
+
 			# Only set custom field if it exists
 			if frappe.db.has_column("User Permission", "user_permission_manager"):
 				perm_doc.user_permission_manager = self.name
-			
+
 			perm_doc.save(ignore_permissions=True)
 		else:
 			# Create new permission
@@ -98,14 +116,11 @@ class UserPermissionManager(Document):
 			perm_doc.user = user
 			perm_doc.allow = detail.allow
 			perm_doc.for_value = detail.for_value
-			
-			if detail.applicable_for:
-				perm_doc.applicable_for = detail.applicable_for
-			
-			perm_doc.apply_to_all = 1 if detail.apply_to_all_doctypes else 0
+			perm_doc.applicable_for = detail.applicable_for or None
+			perm_doc.apply_to_all_doctypes = 1 if detail.apply_to_all_doctypes else 0
 			perm_doc.is_default = 1 if detail.is_default else 0
 			perm_doc.hide_descendants = 1 if detail.hide_descendants else 0
-			
+
 			# Only set custom field if it exists
 			if frappe.db.has_column("User Permission", "user_permission_manager"):
 				perm_doc.user_permission_manager = self.name
@@ -113,7 +128,24 @@ class UserPermissionManager(Document):
 			perm_doc.insert(ignore_permissions=True)
 		
 		frappe.db.commit()
-	
+
+	def clear_existing_defaults(self, user, doctype):
+		"""Clear existing default flags for the same user and doctype"""
+		# Find all User Permissions for this user and doctype that have is_default=1
+		existing_defaults = frappe.get_all(
+			"User Permission",
+			filters={
+				"user": user,
+				"allow": doctype,
+				"is_default": 1
+			},
+			pluck="name"
+		)
+
+		# Unset the default flag on each
+		for perm_name in existing_defaults:
+			frappe.db.set_value("User Permission", perm_name, "is_default", 0, update_modified=False)
+
 	def remove_existing_managed_permissions(self, user):
 		"""Remove existing permissions managed by this manager"""
 		# First, add custom field to User Permission if it doesn't exist

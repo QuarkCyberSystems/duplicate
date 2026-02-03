@@ -37,8 +37,10 @@
   {
    "fieldname": "applicable_for",
    "fieldtype": "Link",
+   "in_list_view": 1,
    "label": "Applicable For",
-   "options": "DocType"
+   "options": "DocType",
+   "depends_on": "eval:!doc.apply_to_all_doctypes"
   },
   {
    "default": "0",
